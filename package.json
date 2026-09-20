@@ -1,0 +1,19 @@
+{
+  "name": "gst-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MERN GST management application - invoices, returns, e-invoicing, ITC reconciliation",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "seed": "npm run seed -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

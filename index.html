@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GST Manager — Prototype</title>
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --primary: #0066ff;
+    --primary-dark: #0052cc;
+    --teal: #00b39b;
+    --amber: #ff9500;
+    --red: #ff3b30;
+    --text: #1c2333;
+    --muted: #6b7280;
+    --border: #e5e9f2;
+    --sidebar-w: 250px;
+    --radius: 12px;
+    --shadow: 0 1px 3px rgba(16, 24, 40, .08), 0 1px 2px rgba(16, 24, 40, .04);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: var(--sidebar-w);
+    background: #101828;
+    color: #cbd5e1;
+    padding: 20px 16px;
+    position: fixed;
+    top: 0; bottom: 0; left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; color: #fff; }
+  .brand .logo {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--primary), #00b39b);
+    display: grid; place-items: center; font-weight: 800; font-size: 18px; color: #fff;
+  }
+  .brand .name { font-weight: 700; font-size: 15px; }
+  .brand .sub { font-size: 11px; color: #8b95a7; }
+  .nav-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #5b6472; padding: 14px 8px 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 12px; border-radius: 9px; cursor: pointer;
+    font-size: 14px; color: #cbd5e1; transition: background .15s, color .15s;
+  }
+  .nav-item:hover { background: rgba(255,255,255,.06); }
+  .nav-item.active { background: rgba(0,102,255,.18); color: #fff; font-weight: 600; }
+  .nav-item .icon { width: 18px; text-align: center; }
+  .sidebar-footer { margin-top: auto; padding: 12px; border-top: 1px solid #1f2937; font-size: 12px; color: #8b95a7; }
+
+  /* Main */
+  .main { margin-left: var(--sidebar-w); flex: 1; padding: 24px 32px; max-width: 1200px; }
+  .topbar {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 20px; display: flex; align-items: center; justify-content: space-between;
+    box-shadow: var(--shadow);
+  }
+  .topbar h1 { font-size: 18px; }
+  .topbar .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .company {
+    display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted);
+  }
+  .company .avatar {
+    width: 34px; height: 34px; border-radius: 8px; background: #eef2ff; color: var(--primary);
+    display: grid; place-items: center; font-weight: 700;
+  }
+
+  .content { margin-top: 24px; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Cards */
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+  }
+  .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .stat-value { font-size: 26px; font-weight: 700; margin-top: 6px; }
+  .stat-delta { font-size: 12px; margin-top: 6px; }
+  .up { color: var(--teal); }
+  .down { color: var(--red); }
+  .muted { color: var(--muted); }
+
+  /* Chart */
+  .chart { display: flex; align-items: flex-end; gap: 14px; height: 180px; padding-top: 10px; }
+  .chart .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .chart .bar {
+    width: 100%; max-width: 46px; background: linear-gradient(180deg, var(--primary), #80b3ff);
+    border-radius: 8px 8px 0 0; min-height: 4px; position: relative; transition: height .4s;
+  }
+  .chart .bar.second { background: linear-gradient(180deg, var(--teal), #7cd9c9); }
+  .chart .bar:hover::after {
+    content: attr(data-label); position: absolute; top: -26px; left: 50%; transform: translateX(-50%);
+    background: #101828; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 6px; white-space: nowrap;
+  }
+  .chart .month { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  td { padding: 12px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #f8fafd; }
+  .badge { padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+  .badge.green { background: #e6f9f5; color: var(--teal); }
+  .badge.amber { background: #fff4e0; color: var(--amber); }
+  .badge.blue { background: #e8f0ff; color: var(--primary); }
+  .badge.red { background: #ffe9e7; color: var(--red); }
+  .badge.gray { background: #eef1f6; color: var(--muted); }
+
+  /* Buttons / inputs */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+    background: var(--primary); color: #fff; border: none; border-radius: 9px;
+    padding: 10px 16px; font-size: 13.5px; font-weight: 600; transition: background .15s;
+  }
+  .btn:hover { background: var(--primary-dark); }
+  .btn.outline { background: #fff; color: var(--primary); border: 1px solid #cbd8f5; }
+  .btn.outline:hover { background: #f0f5ff; }
+  .btn.small { padding: 7px 12px; font-size: 12.5px; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .card-header h3 { font-size: 15px; }
+
+  .row-actions { display: flex; gap: 6px; }
+  .link { color: var(--primary); cursor: pointer; font-weight: 600; }
+  .link:hover { text-decoration: underline; }
+
+  /* Progress (return filing) */
+  .progress-track { display: flex; gap: 8px; margin: 8px 0 16px; }
+  .pt { flex: 1; text-align: center; font-size: 11.5px; color: var(--muted); }
+  .pt .dot { width: 100%; height: 8px; border-radius: 6px; background: #eef1f6; margin-bottom: 6px; }
+  .pt.done .dot { background: var(--teal); }
+  .pt.now .dot { background: var(--primary); }
+
+  /* Filter pills */
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { padding: 7px 14px; border-radius: 999px; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--muted); }
+  .pill.active { background: #e8f0ff; border-color: #cbd8f5; color: var(--primary); font-weight: 600; }
+
+  .empty { text-align: center; padding: 40px; color: var(--muted); font-size: 13.5px; }
+</style>
+</head>
+<body>
+
+<!-- ============ SIDEBAR ============ -->
+<aside class="sidebar">
+  <div class="brand">
+    <div class="logo">G</div>
+    <div>
+      <div class="name">GST Manager</div>
+      <div class="sub">Prototype v0.1</div>
+    </div>
+  </div>
+
+  <div class="nav-label">Overview</div>
+  <div class="nav-item active" data-page="dashboard">
+    <span class="icon">📊</span> Dashboard
+  </div>
+  <div class="nav-item" data-page="invoices">
+    <span class="icon">🧾</span> E-Invoices
+  </div>
+  <div class="nav-item" data-page="returns">
+    <span class="icon">🗂️</span> GSTR Filing
+  </div>
+
+  <div class="nav-label">Manage</div>
+  <div class="nav-item" data-page="purchases">
+    <span class="icon">🛒</span> Purchases
+  </div>
+  <div class="nav-item" data-page="itc">
+    <span class="icon">♻️</span> ITC Ledger
+  </div>
+  <div class="nav-item" data-page="parties">
+    <span class="icon">👥</span> Parties
+  </div>
+  <div class="nav-item" data-page="reports">
+    <span class="icon">📈</span> Reports
+  </div>
+
+  <div class="sidebar-footer">FY 2025-26 · GSTR return status shown for demo</div>
+</aside>
+
+<!-- ============ MAIN ============ -->
+<main class="main">
+  <div class="topbar">
+    <div>
+      <h1 id="page-title">Dashboard</h1>
+      <div class="sub" id="page-sub">Greenshine Traders Pvt. Ltd. · 29AAACG1234F1Z5 · Mumbai, MH</div>
+    </div>
+    <div class="company">
+      <button class="btn outline small">⬇ Export</button>
+      <div class="avatar">GS</div>
+      <span>Greenshine Traders</span>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ======== DASHBOARD ======== -->
+    <section class="page active" id="page-dashboard">
+      <div class="grid-4">
+        <div class="card">
+          <div class="stat-label">Turnover (this FY)</div>
+          <div class="stat-value">₹ 48.2 Cr</div>
+          <div class="stat-delta up">▲ 12.4% vs last FY</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">Output Tax (SGST+CGST)</div>
+          <div class="stat-value">₹ 4.61 Cr</div>
+          <div class="stat-delta up">▲ 8.1% vs last FY</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">ITC Availed</div>
+          <div class="stat-value">₹ 2.94 Cr</div>
+          <div class="stat-delta down">▼ 2.3% vs last quarter</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">Net Tax Payable (Jul)</div>
+          <div class="stat-value">₹ 18.4 L</div>
+          <div class="stat-delta amber" style="color:var(--amber)">◆ Due 20 Aug 2026</div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-header">
+            <h3>Monthly Tax Liability vs ITC</h3>
+            <span class="muted" style="font-size:12px">₹ lakhs · last 6 months</span>
+          </div>
+          <div class="chart" id="chart-liability"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>Return Filing Status</h3>
+            <button class="btn small">View all</button>
+          </div>
+          <table>
+            <thead><tr><th>Return</th><th>Period</th><th>Status</th><th>Due</th></tr></thead>
+            <tbody>
+              <tr><td><strong>GSTR-1</strong></td><td>Aug 2026</td><td><span class="badge amber">Draft</span></td><td>11 Sep</td></tr>
+              <tr><td><strong>GSTR-3B</strong></td><td>Aug 2026</td><td><span class="badge amber">Pending</span></td><td>20 Sep</td></tr>
+              <tr><td><strong>GSTR-1</strong></td><td>Jul 2026</td><td><span class="badge green">Filed</span></td><td>—</td></tr>
+              <tr><td><strong>GSTR-3B</strong></td><td>Jul 2026</td><td><span class="badge green">Filed</span></td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header">
+          <h3>Recent E-Invoices</h3>
+          <button class="btn small" onclick="navigate('invoices')">Create invoice →</button>
+        </div>
+        <table>
+          <thead><tr><th>Inv No.</th><th>Party</th><th>Date</th><th>Taxable Value</th><th>GST</th><th>Irn</th></tr></thead>
+          <tbody id="recent-invoices"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ======== INVOICES ======== -->
+    <section class="page" id="page-invoices">
+      <div class="card">
+        <div class="card-header">
+          <h3>Create E-Invoice</h3>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px">
+          <div>
+            <label class="stat-label">Party</label>
+            <input class="input" list="party-list" id="inv-party" placeholder="Select customer" value="Akshaya Retailers">
+          </div>
+          <div>
+            <label class="stat-label">Invoice No.</label>
+            <input class="input" id="inv-no" value="GI/2026/1024">
+          </div>
+          <div>
+            <label class="stat-label">Date</label>
+            <input class="input" id="inv-date" type="date" value="2026-09-18">
+          </div>
+        </div>
+        <datalist id="party-list">
+          <option value="Akshaya Retailers"></option>
+          <option value="Venus Electronics"></option>
+          <option value="MegaMart Wholesale"></option>
+          <option value="Zephyr Exports"></option>
+        </datalist>
+
+        <table id="inv-sku-table" style="margin-top:16px">
+          <thead><tr><th>Item</th><th>HSN/SAC</th><th>Qty</th><th>Rate (₹)</th><th>GST %</th><th>Amount (₹)</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><input class="input" value="LED Bulb 9W"></td>
+              <td><input class="input" value="8539" style="width:90px"></td>
+              <td><input class="input" type="number" value="100" style="width:80px"></td>
+              <td><input class="input" type="number" value="85" style="width:90px"></td>
+              <td><select class="input" style="width:90px"><option>5%</option><option selected>18%</option><option>28%</option></select></td>
+              <td class="muted" style="text-align:right">8,500</td>
+            </tr>
+            <tr>
+              <td><input class="input" value="LED Panel 12W"></td>
+              <td><input class="input" value="8539" style="width:90px"></td>
+              <td><input class="input" type="number" value="40" style="width:80px"></td>
+              <td><input class="input" type="number" value="640" style="width:90px"></td>
+              <td><select class="input" style="width:90px"><option>5%</option><option selected>18%</option><option>28%</option></select></td>
+              <td class="muted" style="text-align:right">25,600</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="display:flex; justify-content:flex-end; gap:24px; margin-top:16px; font-size:13.5px">
+          <div>Total Taxable: <strong>₹ 34,100</strong></div>
+          <div>CGST: <strong>₹ 3,069</strong></div>
+          <div>SGST: <strong>₹ 3,069</strong></div>
+          <div style="font-size:15px">Total: <strong>₹ 40,238</strong></div>
+        </div>
+        <div style="margin-top:16px; display:flex; gap:10px; justify-content:flex-end">
+          <button class="btn outline small">Save draft</button>
+          <button class="btn small">Generate & push to IRP</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header">
+          <h3>Recent E-Invoices</h3>
+          <div class="pills">
+            <span class="pill active">All</span><span class="pill">Pending IRN</span><span class="pill">Cancelled</span>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>Inv No.</th><th>Party</th><th>Date</th><th>Amount</th><th>IRN Status</th><th></th></tr></thead>
+          <tbody id="invoice-list"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ======== RETURNS ======== -->
+    <section class="page" id="page-returns">
+      <div class="grid-4">
+        <div class="card">
+          <div class="stat-label">GSTR-1 Status</div>
+          <div class="stat-value" style="font-size:20px">Pending</div>
+          <div class="stat-delta muted">Aug 2026 · due 11 Sep</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">GSTR-3B Status</div>
+          <div class="stat-value" style="font-size:20px">Draft</div>
+          <div class="stat-delta muted">Aug 2026 · due 20 Sep</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">Liability (Aug)</div>
+          <div class="stat-value" style="font-size:20px">₹ 21.6 L</div>
+          <div class="stat-delta down">After ITC ₹ 7.8 L</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">Penalty Lock</div>
+          <div class="stat-value" style="font-size:20px">₹ 0</div>
+          <div class="stat-delta up">On-time for 11 months</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3>Aug 2026 · Step-by-step</h3></div>
+        <div class="progress-track">
+          <div class="pt done"><div class="dot"></div>Sales data → GSTR-1</div>
+          <div class="pt now"><div class="dot"></div>GSTR-1 review & submit</div>
+          <div class="pt"><div class="dot"></div>GSTR-3B summary</div>
+          <div class="pt"><div class="dot"></div>Pay tax</div>
+        </div>
+        <table>
+          <thead><tr><th>Section</th><th>Auto-filled</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>4A · B2B invoices</td><td>₹ 38.4 L</td><td>328 docs · all IRN-validated</td></tr>
+            <tr><td>4B · B2C large (signed)</td><td>₹ 4.2 L</td><td>46 docs</td></tr>
+            <tr><td>4C · B2C small / unregistered</td><td>₹ 3.6 L</td><td></td></tr>
+            <tr><td>6B · Credit notes</td><td>−₹ 0.9 L</td><td>12 docs</td></tr>
+          </tbody>
+        </table>
+        <div style="display:flex; gap:10px; margin-top:16px">
+          <button class="btn">Review & submit GSTR-1</button>
+          <button class="btn outline">Download summary</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======== PURCHASES ======== -->
+    <section class="page" id="page-purchases">
+      <div class="card">
+        <div class="card-header">
+          <h3>Bill of Entry / Purchase Register</h3>
+          <button class="btn small">+ Record purchase</button>
+        </div>
+        <table>
+          <thead><tr><th>Vendor</th><th>Bill No.</th><th>Date</th><th>Taxable</th><th>GST</th><th>ITC Eligible</th></tr></thead>
+          <tbody>
+            <tr><td>Bright Components Co</td><td>BC/2471</td><td>14 Sep 2026</td><td>₹ 1,20,000</td><td>₹ 21,600</td><td><span class="badge green">Yes</span></td></tr>
+            <tr><td>Electron Surplus</td><td>ES/8890</td><td>09 Sep 2026</td><td>₹ 4,80,000</td><td>₹ 86,400</td><td><span class="badge green">Yes</span></td></tr>
+            <tr><td>QuickCabs (GST on cab)</td><td>QC/104</td><td>05 Sep 2026</td><td>₹ 1,850</td><td>₹ 333</td><td><span class="badge red" title="Blocked credit">No (blocked)</span></td></tr>
+            <tr><td>Advocate Fees</td><td>AF/312</td><td>02 Sep 2026</td><td>₹ 25,000</td><td>₹ 4,500</td><td><span class="badge amber">Partial</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ======== ITC ======== -->
+    <section class="page" id="page-itc">
+      <div class="grid-4">
+        <div class="card"><div class="stat-label">Total ITC</div><div class="stat-value" style="font-size:20px">₹ 2.94 Cr</div><div class="stat-delta up">▲ 4.1%</div></div>
+        <div class="card"><div class="stat-label">CGST Credit</div><div class="stat-value" style="font-size:20px">₹ 1.21 Cr</div></div>
+        <div class="card"><div class="stat-label">SGST Credit</div><div class="stat-value" style="font-size:20px">₹ 1.05 Cr</div></div>
+        <div class="card"><div class="stat-label">IGST Credit</div><div class="stat-value" style="font-size:20px">₹ 0.68 Cr</div></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3>ITC Utilization Ledger</h3></div>
+        <table>
+          <thead><tr><th>Period</th><th>ITC Availed</th><th>Used vs Output</th><th>Refund Claim</th><th>Expiry Risk</th></tr></thead>
+          <tbody>
+            <tr><td>Aug 2026</td><td>₹ 26.4 L</td><td>₹ 21.6 L (82%)</td><td>—</td><td><span class="badge blue">Low</span></td></tr>
+            <tr><td>Jul 2026</td><td>₹ 24.8 L</td><td>₹ 19.2 L (77%)</td><td>₹ 5.6 L claim filed</td><td><span class="badge green">None</span></td></tr>
+            <tr><td>Jun 2026</td><td>₹ 22.1 L</td><td>₹ 20.3 L (92%)</td><td>—</td><td><span class="badge amber">Partial</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ======== PARTIES ======== -->
+    <section class="page" id="page-parties">
+      <div class="card">
+        <div class="card-header">
+          <h3>GSTIN Master</h3>
+          <div style="display:flex; gap:8px">
+            <input class="input" placeholder="Search GSTIN / name" style="width:260px">
+            <button class="btn small">+ Add party</button>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>Name</th><th>GSTIN</th><th>State</th><th>Type</th><th>Valid Upto</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>Akshaya Retailers</td><td>29AABCD1234E1Z5</td><td>Karnataka</td><td>B2B</td><td>Mar 2027</td><td><span class="badge green">Active</span></td></tr>
+            <tr><td>Venus Electronics</td><td>27AABCE5678K1Z2</td><td>Maharashtra</td><td>B2B</td><td>Mar 2027</td><td><span class="badge green">Active</span></td></tr>
+            <tr><td>MegaMart Wholesale</td><td>07AAICD9090R1Z9</td><td>Delhi</td><td>B2B</td><td>—</td><td><span class="badge amber">Unexpired</span></td></tr>
+            <tr><td>Zephyr Exports</td><td>24AAACZ4444E1Z3</td><td>Gujarat</td><td>Export</td><td>—</td><td><span class="badge gray">EOU</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ======== REPORTS ======== -->
+    <section class="page" id="page-reports">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><h3>GST by HSN Code</h3></div>
+          <table>
+            <thead><tr><th>HSN</th><th>Description</th><th>Sales</th><th>Rate</th></tr></thead>
+            <tbody>
+              <tr><td>8539</td><td>LED lamps</td><td>₹ 31.6 Cr</td><td>18%</td></tr>
+              <tr><td>8541</td><td>Semiconductors</td><td>₹ 9.8 Cr</td><td>18%</td></tr>
+              <tr><td>8504</td><td>Transformers</td><td>₹ 4.2 Cr</td><td>18%</td></tr>
+              <tr><td>8211</td><td>Hand tools</td><td>₹ 2.6 Cr</td><td>12%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Tax Collected vs Paid</h3></div>
+          <div class="chart" id="chart-collected"></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<input type="hidden" id="enable-js" />
+
+<script>
+  const NAV = {
+    dashboard: ["Dashboard", "Greenshine Traders Pvt. Ltd. · 29AAACG1234F1Z5 · Mumbai, MH"],
+    invoices: ["E-Invoices", "Generate, validate & push invoices to the IRP"],
+    returns: ["GSTR Filing", "GSTR-1 & GSTR-3B for Aug 2026"],
+    purchases: ["Purchases", "Purchase register & ITC eligibility review"],
+    itc: ["ITC Ledger", "Input tax credit availed, utilized & refunds"],
+    parties: ["Parties", "GSTIN master & compliance verification"],
+    reports: ["Reports", "HSN-wise sales & GST collections"],
+  };
+
+  function navigate(page) {
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    document.getElementById("page-" + page).classList.add("active");
+    document.querySelectorAll(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.page === page));
+    document.getElementById("page-title").textContent = NAV[page][0];
+    document.getElementById("page-sub").textContent  = NAV[page][1];
+  }
+
+  document.querySelectorAll(".nav-item").forEach(n =>
+    n.addEventListener("click", () => navigate(n.dataset.page))
+  );
+
+  // Simple bar chart renderer
+  function renderChart(el, data, second) {
+    const max = Math.max(...data);
+    el.innerHTML = "";
+    ["Apr", "May", "Jun", "Jul", "Aug", "Sep"].forEach((m, i) => {
+      const wrap = document.createElement("div");
+      wrap.className = "bar-wrap";
+      const bar = document.createElement("div");
+      bar.className = "bar" + (second ? " second" : "");
+      bar.style.height = Math.round((data[i] / max) * 150) + "px";
+      bar.dataset.label = "₹ " + data[i] + " L";
+      const mon = document.createElement("div");
+      mon.className = "month";
+      mon.textContent = m;
+      wrap.append(bar, mon);
+      el.appendChild(wrap);
+    });
+  }
+
+  renderChart(document.getElementById("chart-liability"), [14, 17, 16, 21, 19, 22], false);
+  renderChart(document.getElementById("chart-collected"), [12, 13, 15, 18, 17, 21], true);
+
+  // Seed invoice tables
+  const invoices = [
+    ["GI/2026/1023", "Akshaya Retailers", "17 Sep 2026", "₹ 2,14,800", "blue", "IRN valid"],
+    ["GI/2026/1022", "Venus Electronics", "16 Sep 2026", "₹ 96,400", "green", "Pushed to IRP"],
+    ["GI/2026/1021", "MegaMart Wholesale", "14 Sep 2026", "₹ 4,50,120", "gray", "Not generated"],
+    ["GI/2026/1020", "Zephyr Exports (SEZ)", "12 Sep 2026", "₹ 1,88,000", "green", "Zero-rated"],
+    ["GI/2026/1019", "Akshaya Retailers", "11 Sep 2026", "₹ 63,750", "red", "Cancelled"],
+  ];
+
+  const listEl = document.getElementById("invoice-list");
+  const recentEl = document.getElementById("recent-invoices");
+
+  function rowHTML(r) {
+    const badge = r[4] === "blue" ? "amber" : r[4];
+    return `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td><span class="badge ${badge}">${r[5]}</span></td><td class="row-actions"><span class="link">View</span><span class="link">Cancel</span></td></tr>`;
+  }
+
+  listEl.innerHTML = invoices.map(rowHTML).join("");
+  recentEl.innerHTML = invoices.slice(1, 4).map(r =>
+    `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>18%</td><td><span class="badge ${r[4] === "blue" ? "amber" : r[4]}">${r[5]}</span></td></tr>`
+  ).join("");
+</script>
+
+<style>
+  .input {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 13.5px; color: var(--text); background: #fff;
+  }
+  .input:focus { outline: 2px solid #d6e4ff; border-color: var(--primary); }
+</style>
+</body>
+</html>
