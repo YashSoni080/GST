@@ -13,8 +13,9 @@ export async function connectDB() {
   }
 
   const isLocal =
-    config.mongodbUri.includes("127.0.0.1") ||
-    config.mongodbUri.includes("localhost");
+    !process.env.VERCEL &&
+    (config.mongodbUri.includes("127.0.0.1") ||
+     config.mongodbUri.includes("localhost"));
 
   try {
     const conn = await mongoose.connect(config.mongodbUri, {
