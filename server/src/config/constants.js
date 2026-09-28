@@ -47,6 +47,19 @@ export const ROLE_PERMISSIONS = {
     label: "Administrator",
     caps: "all",
   },
+  accounting_manager: {
+    label: "Accounting Manager",
+    caps: [
+      "dashboard:read", "invoices:read", "invoices:create", "invoices:edit",
+      "invoices:cancel", "invoices:irn", "invoices:eway", "purchases:read",
+      "purchases:create", "purchases:edit", "itc:read", "itc:action", "itc:optimize",
+      "returns:read", "returns:submit", "returns:pay", "recon:read",
+      "recon:run", "ims:read", "ims:action", "parties:read", "parties:create",
+      "parties:edit", "hsn:read", "reports:read", "audit:read",
+      "company:read", "company:edit", "notices:read", "notices:write",
+      "ecommerce:read", "ecommerce:sync",
+    ],
+  },
   accountant: {
     label: "Accountant",
     caps: [
@@ -56,7 +69,15 @@ export const ROLE_PERMISSIONS = {
       "returns:read", "returns:submit", "returns:pay", "recon:read",
       "recon:run", "ims:read", "ims:action", "parties:read", "parties:create",
       "parties:edit", "hsn:read", "reports:read", "audit:read",
-      "company:read", "company:edit",
+      "company:read", "company:edit", "ecommerce:read", "ecommerce:sync",
+    ],
+  },
+  billing_executive: {
+    label: "Billing Executive",
+    caps: [
+      "dashboard:read", "invoices:read", "invoices:create", "invoices:edit",
+      "invoices:cancel", "invoices:irn", "invoices:eway", "parties:read",
+      "parties:create", "hsn:read", "reports:read", "company:read",
     ],
   },
   "data-entry": {
@@ -74,6 +95,16 @@ export const ROLE_PERMISSIONS = {
       "dashboard:read", "invoices:read", "purchases:read", "itc:read",
       "returns:read", "recon:read", "recon:run", "ims:read", "parties:read",
       "hsn:read", "reports:read", "audit:read", "company:read",
+      "notices:read", "ecommerce:read",
+    ],
+  },
+  external_ca: {
+    label: "External Tax Auditor / CA",
+    caps: [
+      "dashboard:read", "invoices:read", "purchases:read", "itc:read",
+      "returns:read", "recon:read", "recon:run", "ims:read", "parties:read",
+      "hsn:read", "reports:read", "audit:read", "company:read",
+      "notices:read", "notices:draft", "ecommerce:read",
     ],
   },
 };

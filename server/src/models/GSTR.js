@@ -5,7 +5,7 @@ const gstrSchema = new mongoose.Schema(
     companyId: { type: mongoose.Types.ObjectId, ref: "Company", required: true },
     companyGstin: { type: String, required: true },
     period: { type: String, required: true }, // YYYY-MM
-    type: { type: String, enum: ["GSTR1", "GSTR3B", "GSTR2B"], required: true },
+    type: { type: String, enum: ["GSTR1", "GSTR3B", "GSTR2B", "CMP08", "GSTR4", "GSTR9", "GSTR9C"], required: true },
     status: {
       type: String,
       enum: ["draft", "validated", "generated", "filed", "partially_filed"],

@@ -18,9 +18,17 @@ const partySchema = new mongoose.Schema(
     type: { type: String, enum: ["customer", "vendor", "both"], default: "customer" },
     email: String,
     phone: String,
-    // Compliance / ITC risk model (rule-based, ML-ready)
+    // Compliance / ITC risk model & Continuous Vendor Scoring (PRD Section 2.2)
     itcRiskScore: { type: Number, min: 0, max: 100, default: 0 },
     itcRiskLevel: { type: String, enum: ["low", "medium", "high"], default: "low" },
+    complianceScore: { type: Number, min: 0, max: 100, default: 95 },
+    complianceCategory: {
+      type: String,
+      enum: ["Consistent", "Delayed Filer", "Chronic Non-Filer"],
+      default: "Consistent",
+    },
+    filingPunctualityRate: { type: Number, default: 95 },
+    procurementAlert: { type: Boolean, default: false },
     riskSignals: [{ type: String }],
     riskLastComputed: Date,
     status: { type: String, enum: ["active", "inactive"], default: "active" },

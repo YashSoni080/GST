@@ -19,3 +19,6 @@ build/
 
 # Vite
 client/.vite/
+
+# Local DB
+data/

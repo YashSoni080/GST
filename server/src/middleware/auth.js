@@ -11,14 +11,17 @@ export function signToken(user) {
 
 export async function requireAuth(req, res, next) {
   const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  let token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token && typeof req.query?.token === "string" && req.query.token.trim()) {
+    token = req.query.token.trim();
+  }
   if (!token) {
     return res.status(401).json({ error: "Authentication required" });
   }
   try {
     const payload = jwt.verify(token, config.jwtSecret);
     const { User } = req.app.locals.models;
-    const user = await User.findById(payload.sub).lean();
+    const user = await User.findById(payload.sub).select("-passwordHash").lean();
     if (!user || !user.active) {
       return res.status(401).json({ error: "Account disabled or removed" });
     }

@@ -2,10 +2,10 @@ import { UNION_TERRITORIES } from "../config/constants.js";
 
 const round = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-// Core GST tax calculation engine.
+// Core GST tax calculation engine:
 // Intra-state (same branch + place of supply state): CGST + SGST
-// Inter-state: IGST
-// Supplies to a Union Territory (posStateCode in UT set): CGST + UTGST
+// Intra-Union Territory (same branch + place of supply in UT without legislature): CGST + UTGST
+// Inter-state / Inter-UT (different branch and place of supply state/UT): IGST
 export function computeTaxes(items, { posStateCode, branchStateCode }) {
   let taxableValue = 0;
   let cgst = 0;
@@ -15,7 +15,7 @@ export function computeTaxes(items, { posStateCode, branchStateCode }) {
   let cess = 0;
 
   const isUT = UNION_TERRITORIES.has(String(posStateCode));
-  const intra = String(posStateCode) === String(branchStateCode) && !isUT;
+  const intra = String(posStateCode) === String(branchStateCode);
 
   for (const it of items) {
     const qty = Number(it.qty) || 0;
@@ -32,19 +32,16 @@ export function computeTaxes(items, { posStateCode, branchStateCode }) {
     }
 
     if (intra) {
-      cgst = round(cgst + gst / 2);
-      sgst = round(sgst + gst / 2);
+      if (isUT) {
+        cgst = round(cgst + gst / 2);
+        utgst = round(utgst + gst / 2);
+      } else {
+        cgst = round(cgst + gst / 2);
+        sgst = round(sgst + gst / 2);
+      }
     } else {
       igst = round(igst + gst);
     }
-  }
-
-  if (isUT && !intra) {
-    // UT supply: CGST + UTGST
-    const totalGst = igst;
-    igst = 0;
-    cgst = round(cgst + totalGst / 2);
-    utgst = round(totalGst / 2);
   }
 
   const gross = round(taxableValue + cgst + sgst + igst + utgst + cess);
