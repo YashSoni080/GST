@@ -1,10 +1,11 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { signToken, requireAuth } from "../middleware/auth.js";
+import { authLimiter } from "../middleware/rateLimit.js";
 
 const router = Router();
 
-router.post("/register", async (req, res, next) => {
+router.post("/register", authLimiter, async (req, res, next) => {
   try {
     const { User, Company } = req.app.locals.models;
     const { name, email, password, companyName } = req.body;
@@ -32,7 +33,7 @@ router.post("/register", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post("/login", async (req, res, next) => {
+router.post("/login", authLimiter, async (req, res, next) => {
   try {
     const { User, Company } = req.app.locals.models;
     const { email, password } = req.body;

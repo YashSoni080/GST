@@ -62,7 +62,6 @@ export const api = {
 
   // Dashboard
   dashboard: () => request('/dashboard'),
-  dashboardStats: () => request('/dashboard/stats'),
 
   // Company & Multi-GSTIN
   getCompany: () => request('/company'),

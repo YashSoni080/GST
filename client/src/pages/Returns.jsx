@@ -1,38 +1,55 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
+import { StatCard, Callout, Skeleton, SkeletonCard, SkeletonTable, EmptyState, ErrorState, Modal } from '../components/ui';
+import { useToast } from '../components/Toast';
 
 export default function Returns() {
+  const toast = useToast();
   const [returns, setReturns] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('monthly'); // 'monthly' | 'gstr9'
   const [gstr9Data, setGstr9Data] = useState(null);
+  const [gstr9Loading, setGstr9Loading] = useState(true);
+  const [gstr9Error, setGstr9Error] = useState(null);
   const [generating, setGenerating] = useState(false);
+  const [filing, setFiling] = useState(false);
+  const [status, setStatus] = useState('');
   const [genPeriod, setGenPeriod] = useState('2026-09');
   const [genType, setGenType] = useState('GSTR1');
   const [evcModal, setEvcModal] = useState(null);
   const [otp, setOtp] = useState('');
 
   const load = () => {
+    setError(null);
     api.getReturns()
       .then(data => setReturns(data.returns || data || []))
-      .catch(() => {})
+      .catch(err => setError(err))
       .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
 
+  const retry = () => {
+    setLoading(true);
+    load();
+  };
+
   const handleCompile = async () => {
+    if (generating) return;
     setGenerating(true);
+    setStatus(`Compiling ${genType} for ${genPeriod}…`);
     try {
       const res = await api.compileReturn(genType, genPeriod);
       load();
       setSelected(res);
-      alert(`Successfully compiled ${genType} for period ${genPeriod}!`);
+      toast.success(`${genType} compiled for ${genPeriod}`, 'Aggregated GSTN JSON is ready — review the breakdown below before filing.');
     } catch (err) {
-      alert(err.message);
+      toast.error('Return compilation failed', err.message);
     } finally {
       setGenerating(false);
+      setStatus('');
     }
   };
 
@@ -48,31 +65,41 @@ export default function Returns() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      toast.success('GSTN JSON downloaded', `${ret.type} · ${ret.period} saved to your device.`);
     } catch (err) {
-      alert(err.message || 'Failed to download return JSON payload');
+      toast.error('Could not download the return JSON', err.message || 'Download failed');
     }
   };
 
   const handleFileReturn = async () => {
-    if (!evcModal) return;
+    if (!evcModal || filing) return;
+    setFiling(true);
+    setStatus('Verifying EVC and submitting return…');
     try {
       const updated = await api.submitReturn(evcModal._id, { filingMode: 'EVC', otp });
       setEvcModal(null);
       setOtp('');
       load();
       setSelected(updated);
-      alert(`Return filed successfully! Statutory ARN: ${updated.arn}`);
+      toast.success('Return filed successfully!', `Statutory ARN: ${updated.arn}`);
     } catch (err) {
-      alert(err.message);
+      toast.error('Return filing failed', err.message);
+    } finally {
+      setFiling(false);
+      setStatus('');
     }
   };
 
   const loadGSTR9 = async () => {
+    setGstr9Error(null);
+    setGstr9Loading(true);
     try {
       const data = await api.getGSTR9('2025-26');
       setGstr9Data(data);
     } catch (err) {
-      alert(err.message);
+      setGstr9Error(err);
+    } finally {
+      setGstr9Loading(false);
     }
   };
 
@@ -80,252 +107,322 @@ export default function Returns() {
     if (activeTab === 'gstr9') loadGSTR9();
   }, [activeTab]);
 
-  const statusBadge = (status) => {
+  const statusBadge = (s) => {
     const map = { filed: 'green', validated: 'blue', draft: 'amber', generated: 'blue', partially_filed: 'red' };
-    return <span className={`badge ${map[status] || 'gray'}`}>{status}</span>;
+    return <span className={`badge ${map[s] || 'gray'}`}>{s}</span>;
   };
+
+  const filedCount = returns.filter(r => r.status === 'filed').length;
+  const validatedCount = returns.filter(r => r.status === 'validated').length;
 
   return (
     <>
-      <div className="grid-4" style={{ marginBottom: 16 }}>
-        <div className="card">
-          <div className="stat-label">Total Return Cycles</div>
-          <div className="stat-value" style={{ fontSize: 22 }}>{returns.length}</div>
-          <div className="stat-delta">FY 2025-26</div>
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+        <div className="seg" role="group" aria-label="Choose return builder">
+          <button
+            type="button"
+            className={activeTab === 'monthly' ? 'active' : ''}
+            aria-pressed={activeTab === 'monthly'}
+            onClick={() => setActiveTab('monthly')}
+          >
+            Monthly Statutory Returns (GSTR-1 / 3B)
+          </button>
+          <button
+            type="button"
+            className={activeTab === 'gstr9' ? 'active' : ''}
+            aria-pressed={activeTab === 'gstr9'}
+            onClick={() => setActiveTab('gstr9')}
+          >
+            Annual Return Builder (GSTR-9 & 9C)
+          </button>
         </div>
-        <div className="card">
-          <div className="stat-label">Filed & Acknowledged</div>
-          <div className="stat-value" style={{ fontSize: 22, color: 'var(--teal)' }}>
-            {returns.filter(r => r.status === 'filed').length}
+
+        {activeTab === 'monthly' && (
+          <div className="flex items-end gap-2 flex-wrap">
+            <div>
+              <label className="input-label" htmlFor="gen-type">Return type</label>
+              <select id="gen-type" className="input" value={genType} onChange={e => setGenType(e.target.value)} style={{ width: 170 }}>
+                <option value="GSTR1">GSTR-1 (Outward)</option>
+                <option value="GSTR3B">GSTR-3B (Summary)</option>
+                <option value="CMP08">CMP-08 (Composition Qtr)</option>
+                <option value="GSTR4">GSTR-4 (Composition Annual)</option>
+              </select>
+            </div>
+            <div>
+              <label className="input-label" htmlFor="gen-period">Period</label>
+              <input
+                id="gen-period"
+                type="month"
+                className="input"
+                value={genPeriod}
+                onChange={e => setGenPeriod(e.target.value)}
+                style={{ width: 150 }}
+              />
+            </div>
+            <button type="button" className="btn" onClick={handleCompile} disabled={generating}>
+              {generating ? (
+                <>
+                  <span className="spinner sm" aria-hidden="true" />
+                  Compiling…
+                </>
+              ) : (
+                '⚡ Auto-Compile Return'
+              )}
+            </button>
           </div>
-          <div className="stat-delta up">100% On-time ARN</div>
-        </div>
-        <div className="card">
-          <div className="stat-label">Validated / Ready to File</div>
-          <div className="stat-value" style={{ fontSize: 22, color: 'var(--primary)' }}>
-            {returns.filter(r => r.status === 'validated').length}
-          </div>
-          <div className="stat-delta">Pre-issuance checks passed</div>
-        </div>
-        <div className="card">
-          <div className="stat-label">Late Fee & Penalty</div>
-          <div className="stat-value" style={{ fontSize: 22 }}>₹ 0</div>
-          <div className="stat-delta up">Zero Non-compliance Interest</div>
-        </div>
+        )}
       </div>
 
-      {/* Tabs: Monthly Returns vs GSTR-9 Annual Return Builder */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-        <button
-          className={`btn ${activeTab === 'monthly' ? '' : 'outline'} small`}
-          onClick={() => setActiveTab('monthly')}
-        >
-          Monthly Statutory Returns (GSTR-1 / 3B)
-        </button>
-        <button
-          className={`btn ${activeTab === 'gstr9' ? '' : 'outline'} small`}
-          onClick={() => setActiveTab('gstr9')}
-        >
-          Annual Return Builder (GSTR-9 & 9C)
-        </button>
+      <div role="status" aria-live="polite" style={{ fontSize: 12.5, color: 'var(--muted)', minHeight: 18, marginBottom: 8 }}>
+        {status}
       </div>
+
+      {loading ? (
+        <div className="grid-4" style={{ marginBottom: 16 }}>
+          {[0, 1, 2, 3].map(i => <SkeletonCard key={i} height={118} />)}
+        </div>
+      ) : error ? null : (
+        <div className="grid-4" style={{ marginBottom: 16 }}>
+          <StatCard label="Total Return Cycles" icon="🔁" value={returns.length} delta="FY 2025-26" />
+          <StatCard
+            label="Filed & Acknowledged"
+            icon="✅"
+            accent="teal"
+            value={filedCount}
+            delta="100% On-time ARN"
+            deltaClass="up"
+          />
+          <StatCard
+            label="Validated / Ready to File"
+            icon="📋"
+            value={validatedCount}
+            delta="Pre-issuance checks passed"
+          />
+          <StatCard
+            label="Late Fee & Penalty"
+            icon="🛡️"
+            value="₹ 0"
+            delta="Zero non-compliance interest"
+            deltaClass="up"
+          />
+        </div>
+      )}
 
       {activeTab === 'monthly' && (
         <>
-          {/* Direct Compilation Bar */}
-          <div className="card" style={{ marginBottom: 16, background: '#f8fafc' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <strong style={{ fontSize: 14 }}>One-Click Direct Return Auto-Compiler (Section 2.3)</strong>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  Directly aggregates outward invoices & purchase ITC registers into GSTN JSON format.
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <select className="input" value={genType} onChange={e => setGenType(e.target.value)} style={{ width: 170 }}>
-                  <option value="GSTR1">GSTR-1 (Outward)</option>
-                  <option value="GSTR3B">GSTR-3B (Summary)</option>
-                  <option value="CMP08">CMP-08 (Composition Qtr)</option>
-                  <option value="GSTR4">GSTR-4 (Composition Annual)</option>
-                </select>
-                <input
-                  type="month"
-                  className="input"
-                  value={genPeriod}
-                  onChange={e => setGenPeriod(e.target.value)}
-                  style={{ width: 140 }}
-                />
-                <button className="btn small" onClick={handleCompile} disabled={generating}>
-                  {generating ? 'Compiling...' : '⚡ Auto-Compile Return'}
-                </button>
-              </div>
-            </div>
+          <div className="section-label">Section 2.3 · One-Click Direct Return Auto-Compiler</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+            Directly aggregates outward invoices &amp; purchase ITC registers into GSTN JSON format — no spreadsheet round-trips.
           </div>
 
           <div className="card">
             <div className="card-header">
-              <h3>Statutory Returns Register</h3>
+              <div className="card-title-row">
+                <span className="dot" />
+                <div>
+                  <h3>Statutory Returns Register</h3>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                    Compile, validate and file each period — click a row to open its table-wise breakdown
+                  </div>
+                </div>
+              </div>
             </div>
 
             {loading ? (
-              <div className="empty">Loading returns...</div>
+              <SkeletonTable rows={6} cols={6} />
+            ) : error ? (
+              <ErrorState error={error} onRetry={retry} title="Could not load your returns register" />
+            ) : returns.length === 0 ? (
+              <EmptyState
+                icon="🗂️"
+                title="No returns compiled yet"
+                description="Pick a return type and period above, then auto-compile — outward invoices and eligible ITC are aggregated into a filing-ready GSTN JSON you can review and file with an EVC."
+                action={{ label: '⚡ Auto-Compile Return', onClick: handleCompile }}
+                secondaryAction={{ label: 'Issue invoices first', to: '/invoices' }}
+              />
             ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Return Type</th>
-                    <th>Period</th>
-                    <th>GSTIN</th>
-                    <th>Taxable / Turnover</th>
-                    <th>Tax Liability</th>
-                    <th>Status</th>
-                    <th>ARN / Filed Date</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(returns || []).map(ret => (
-                    <tr key={ret._id} onClick={() => setSelected(ret)} style={{ cursor: 'pointer' }}>
-                      <td><strong>{ret.type}</strong></td>
-                      <td>{ret.period}</td>
-                      <td><span style={{ fontFamily: 'monospace' }}>{ret.companyGstin}</span></td>
-                      <td>₹ {Number(ret.summary?.taxableValue || ret.summary?.outwardTurnover || 0).toLocaleString('en-IN')}</td>
-                      <td>₹ {Number(ret.summary?.totalTax || ret.summary?.outwardTaxLiability || 0).toLocaleString('en-IN')}</td>
-                      <td>{statusBadge(ret.status)}</td>
-                      <td>
-                        {ret.arn ? (
-                          <div>
-                            <span className="badge green" style={{ fontSize: 10.5 }}>{ret.arn}</span>
-                            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-                              {ret.filedAt ? new Date(ret.filedAt).toLocaleDateString('en-IN') : ''}
+              <>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Return Type</th>
+                        <th>Period</th>
+                        <th>GSTIN</th>
+                        <th className="num">Taxable / Turnover</th>
+                        <th className="num">Tax Liability</th>
+                        <th>Status</th>
+                        <th>ARN / Filed Date</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {returns.map(ret => (
+                        <tr key={ret._id} onClick={() => setSelected(ret)} style={{ cursor: 'pointer' }}>
+                          <td><strong>{ret.type}</strong></td>
+                          <td>{ret.period}</td>
+                          <td><span className="mono">{ret.companyGstin}</span></td>
+                          <td className="num">₹ {Number(ret.summary?.taxableValue || ret.summary?.outwardTurnover || 0).toLocaleString('en-IN')}</td>
+                          <td className="num">₹ {Number(ret.summary?.totalTax || ret.summary?.outwardTaxLiability || 0).toLocaleString('en-IN')}</td>
+                          <td>{statusBadge(ret.status)}</td>
+                          <td>
+                            {ret.arn ? (
+                              <div>
+                                <span className="badge green mono" style={{ fontSize: 10.5 }}>{ret.arn}</span>
+                                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                                  {ret.filedAt ? new Date(ret.filedAt).toLocaleDateString('en-IN') : ''}
+                                </div>
+                              </div>
+                            ) : '—'}
+                          </td>
+                          <td>
+                            <div className="row-actions" onClick={e => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                className="btn ghost tiny"
+                                onClick={() => setSelected(ret)}
+                                aria-label={`Open breakdown for ${ret.type} ${ret.period}`}
+                              >
+                                View
+                              </button>
+                              <button
+                                type="button"
+                                className="btn outline tiny"
+                                onClick={() => handleDownloadJSON(ret)}
+                                title="Download official GSTN JSON"
+                                aria-label={`Download GSTN JSON for ${ret.type} ${ret.period}`}
+                              >
+                                📥 JSON
+                              </button>
+                              {ret.status !== 'filed' && (
+                                <button
+                                  type="button"
+                                  className="btn tiny"
+                                  onClick={() => setEvcModal(ret)}
+                                  aria-label={`File ${ret.type} for ${ret.period} with EVC`}
+                                >
+                                  File (EVC)
+                                </button>
+                              )}
                             </div>
-                          </div>
-                        ) : '—'}
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-                          <button
-                            className="btn outline small"
-                            style={{ fontSize: 11, padding: '3px 8px' }}
-                            onClick={() => handleDownloadJSON(ret)}
-                            title="Download official GSTN JSON"
-                          >
-                            📥 JSON
-                          </button>
-                          {ret.status !== 'filed' && (
-                            <button
-                              className="btn small"
-                              style={{ fontSize: 11, padding: '3px 8px' }}
-                              onClick={() => setEvcModal(ret)}
-                            >
-                              File (EVC)
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {(!returns || returns.length === 0) && (
-                    <tr><td colSpan={8} className="empty">No returns found. Click "Auto-Compile Return" above.</td></tr>
-                  )}
-                </tbody>
-              </table>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="table-meta">
+                  <span>
+                    Showing {returns.length} return cycle{returns.length === 1 ? '' : 's'} · FY 2025-26
+                  </span>
+                  <span>{filedCount} filed · {validatedCount} validated</span>
+                </div>
+              </>
             )}
           </div>
 
-          {/* Selected Return Details & Table-Wise Breakdown */}
           {selected && (
             <div className="card" style={{ marginTop: 16 }}>
               <div className="card-header">
                 <div>
                   <h3>{selected.type} Breakdown — Period {selected.period}</h3>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                    GSTIN: {selected.companyGstin} | Status: {selected.status?.toUpperCase()}
+                    GSTIN: <span className="mono">{selected.companyGstin}</span> | Status: {selected.status?.toUpperCase()}
                     {selected.arn && ` | Statutory ARN: ${selected.arn}`}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn outline small" onClick={() => handleDownloadJSON(selected)}>
+                <div className="row-actions">
+                  <button type="button" className="btn outline small" onClick={() => handleDownloadJSON(selected)}>
                     📥 Export GSTN JSON
                   </button>
-                  <button className="close-btn" onClick={() => setSelected(null)}>✕</button>
+                  <button
+                    type="button"
+                    className="close-btn"
+                    onClick={() => setSelected(null)}
+                    aria-label="Close return breakdown"
+                    title="Close breakdown"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
 
-              {/* Progress Track */}
               <div className="progress-track">
                 <div className="pt done"><div className="dot" />Data Compiled</div>
                 <div className={selected.status === 'draft' ? 'pt now' : 'pt done'}><div className="dot" />Pre-issuance Validation</div>
                 <div className={selected.status === 'filed' ? 'pt done' : 'pt'}><div className="dot" />EVC / DSC Filed</div>
               </div>
 
-              {/* Section Data Tables */}
               {selected.type === 'GSTR1' && selected.sections?.b2b && (
                 <div style={{ marginTop: 16 }}>
-                  <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--primary)' }}>Table 4: B2B Outward Supplies</h4>
-                  <table>
-                    <thead>
-                      <tr><th>Recipient GSTIN</th><th>Party Name</th><th>Inv No</th><th>Date</th><th>Taxable</th><th>Total Tax</th><th>POS</th></tr>
-                    </thead>
-                    <tbody>
-                      {(selected.sections.b2b || []).map((b, i) => (
-                        <tr key={i}>
-                          <td>{b.ctin}</td>
-                          <td>{b.cname}</td>
-                          <td><strong>{b.inum}</strong></td>
-                          <td>{b.idt}</td>
-                          <td>₹ {Number(b.taxable).toLocaleString('en-IN')}</td>
-                          <td>₹ {Number((b.cgst || 0) + (b.sgst || 0) + (b.igst || 0)).toLocaleString('en-IN')}</td>
-                          <td>{b.pos}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className="section-label">Table 4: B2B Outward Supplies</div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr><th>Recipient GSTIN</th><th>Party Name</th><th>Inv No</th><th>Date</th><th className="num">Taxable</th><th className="num">Total Tax</th><th>POS</th></tr>
+                      </thead>
+                      <tbody>
+                        {(selected.sections.b2b || []).map((b, i) => (
+                          <tr key={i}>
+                            <td className="mono">{b.ctin}</td>
+                            <td>{b.cname}</td>
+                            <td><strong>{b.inum}</strong></td>
+                            <td>{b.idt}</td>
+                            <td className="num">₹ {Number(b.taxable).toLocaleString('en-IN')}</td>
+                            <td className="num">₹ {Number((b.cgst || 0) + (b.sgst || 0) + (b.igst || 0)).toLocaleString('en-IN')}</td>
+                            <td>{b.pos}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
               {selected.type === 'GSTR1' && selected.sections?.hsn && (
                 <div style={{ marginTop: 16 }}>
-                  <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--primary)' }}>Table 12: HSN-Wise Summary</h4>
-                  <table>
-                    <thead>
-                      <tr><th>HSN Code</th><th>Description</th><th>UQC</th><th>Qty</th><th>Taxable Value</th><th>IGST</th><th>CGST</th><th>SGST</th></tr>
-                    </thead>
-                    <tbody>
-                      {(selected.sections.hsn || []).map((h, i) => (
-                        <tr key={i}>
-                          <td><strong>{h.hsn_sc}</strong></td>
-                          <td>{h.desc}</td>
-                          <td>{h.uqc}</td>
-                          <td>{h.qty}</td>
-                          <td>₹ {Number(h.txval).toLocaleString('en-IN')}</td>
-                          <td>₹ {Number(h.iamt).toLocaleString('en-IN')}</td>
-                          <td>₹ {Number(h.camt).toLocaleString('en-IN')}</td>
-                          <td>₹ {Number(h.samt).toLocaleString('en-IN')}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className="section-label">Table 12: HSN-Wise Summary</div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr><th>HSN Code</th><th>Description</th><th>UQC</th><th className="num">Qty</th><th className="num">Taxable Value</th><th className="num">IGST</th><th className="num">CGST</th><th className="num">SGST</th></tr>
+                      </thead>
+                      <tbody>
+                        {(selected.sections.hsn || []).map((h, i) => (
+                          <tr key={i}>
+                            <td><strong className="mono">{h.hsn_sc}</strong></td>
+                            <td>{h.desc}</td>
+                            <td>{h.uqc}</td>
+                            <td className="num">{h.qty}</td>
+                            <td className="num">₹ {Number(h.txval).toLocaleString('en-IN')}</td>
+                            <td className="num">₹ {Number(h.iamt).toLocaleString('en-IN')}</td>
+                            <td className="num">₹ {Number(h.camt).toLocaleString('en-IN')}</td>
+                            <td className="num">₹ {Number(h.samt).toLocaleString('en-IN')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
               {selected.type === 'GSTR3B' && selected.sections && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
                   <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8 }}>
-                    <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--primary)' }}>3.1 Outward Tax Liabilities</h4>
+                    <div className="section-label" style={{ color: 'var(--primary)' }}>3.1 Outward Tax Liabilities</div>
                     <div style={{ fontSize: 13, lineHeight: '1.8' }}>
-                      <div>Taxable Value: <strong>₹ {Number(selected.sections.table3_1_outward?.taxable || 0).toLocaleString('en-IN')}</strong></div>
-                      <div>CGST: <strong>₹ {Number(selected.sections.table3_1_outward?.cgst || 0).toLocaleString('en-IN')}</strong></div>
-                      <div>SGST: <strong>₹ {Number(selected.sections.table3_1_outward?.sgst || 0).toLocaleString('en-IN')}</strong></div>
-                      <div>IGST: <strong>₹ {Number(selected.sections.table3_1_outward?.igst || 0).toLocaleString('en-IN')}</strong></div>
+                      <div>Taxable Value: <strong className="num">₹ {Number(selected.sections.table3_1_outward?.taxable || 0).toLocaleString('en-IN')}</strong></div>
+                      <div>CGST: <strong className="num">₹ {Number(selected.sections.table3_1_outward?.cgst || 0).toLocaleString('en-IN')}</strong></div>
+                      <div>SGST: <strong className="num">₹ {Number(selected.sections.table3_1_outward?.sgst || 0).toLocaleString('en-IN')}</strong></div>
+                      <div>IGST: <strong className="num">₹ {Number(selected.sections.table3_1_outward?.igst || 0).toLocaleString('en-IN')}</strong></div>
                     </div>
                   </div>
                   <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8 }}>
-                    <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--teal)' }}>4. Eligible Input Tax Credit (ITC)</h4>
+                    <div className="section-label" style={{ color: 'var(--teal-ink)' }}>4. Eligible Input Tax Credit (ITC)</div>
                     <div style={{ fontSize: 13, lineHeight: '1.8' }}>
-                      <div>Net CGST ITC: <strong>₹ {Number(selected.sections.table4_itc?.netITC?.cgst || 0).toLocaleString('en-IN')}</strong></div>
-                      <div>Net SGST ITC: <strong>₹ {Number(selected.sections.table4_itc?.netITC?.sgst || 0).toLocaleString('en-IN')}</strong></div>
-                      <div>Net IGST ITC: <strong>₹ {Number(selected.sections.table4_itc?.netITC?.igst || 0).toLocaleString('en-IN')}</strong></div>
+                      <div>Net CGST ITC: <strong className="num">₹ {Number(selected.sections.table4_itc?.netITC?.cgst || 0).toLocaleString('en-IN')}</strong></div>
+                      <div>Net SGST ITC: <strong className="num">₹ {Number(selected.sections.table4_itc?.netITC?.sgst || 0).toLocaleString('en-IN')}</strong></div>
+                      <div>Net IGST ITC: <strong className="num">₹ {Number(selected.sections.table4_itc?.netITC?.igst || 0).toLocaleString('en-IN')}</strong></div>
                       <div style={{ marginTop: 8, color: 'var(--red)', fontSize: 12 }}>
                         Sec 17(5) Blocked Reversed: ₹ {Number(selected.summary?.itcBlockedTotal || 0).toLocaleString('en-IN')}
                       </div>
@@ -338,44 +435,54 @@ export default function Returns() {
         </>
       )}
 
-      {/* GSTR-9 Annual Return Builder Tab (Section 4.3) */}
       {activeTab === 'gstr9' && (
         <div className="card">
           <div className="card-header">
-            <div>
-              <h3>Automated Annual Return Builder (Form GSTR-9 / 9C)</h3>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                Consolidates 12 months GSTR-1, GSTR-3B, GSTR-2B, and trial balance with DRC-03 recommendation (Section 4.3)
+            <div className="card-title-row">
+              <span className="dot" />
+              <div>
+                <h3>Automated Annual Return Builder (Form GSTR-9 / 9C)</h3>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  Consolidates 12 months GSTR-1, GSTR-3B, GSTR-2B, and trial balance with DRC-03 recommendation (Section 4.3)
+                </div>
               </div>
             </div>
-            <button className="btn outline small" onClick={loadGSTR9}>🔄 Re-calculate GSTR-9</button>
+            <button type="button" className="btn outline small" onClick={loadGSTR9} disabled={gstr9Loading}>
+              {gstr9Loading ? (
+                <>
+                  <span className="spinner sm" aria-hidden="true" />
+                  Recalculating…
+                </>
+              ) : (
+                '🔄 Re-calculate GSTR-9'
+              )}
+            </button>
           </div>
 
-          {!gstr9Data ? (
-            <div className="empty">Loading annual return consolidation...</div>
+          {gstr9Loading ? (
+            <Skeleton lines={5} />
+          ) : gstr9Error ? (
+            <ErrorState error={gstr9Error} onRetry={loadGSTR9} title="Could not consolidate the annual return" />
+          ) : !gstr9Data ? (
+            <EmptyState
+              icon="📊"
+              title="No annual data consolidated yet"
+              description="Run the recalculation to aggregate 12 months of GSTR-1, GSTR-3B, GSTR-2B and your trial balance into the GSTR-9 / 9C format."
+              action={{ label: '🔄 Re-calculate GSTR-9', onClick: loadGSTR9 }}
+            />
           ) : (
             <div>
-              {/* DRC-03 Recommendation Alert */}
-              <div
-                style={{
-                  padding: 16,
-                  borderRadius: 8,
-                  marginBottom: 20,
-                  background: gstr9Data.drc03Recommendation?.required ? '#fff1f2' : '#f0fdf4',
-                  border: `1px solid ${gstr9Data.drc03Recommendation?.required ? '#fecdd3' : '#bbf7d0'}`,
-                }}
-              >
-                <div style={{ fontWeight: 700, fontSize: 14, color: gstr9Data.drc03Recommendation?.required ? 'var(--red)' : '#166534' }}>
-                  {gstr9Data.drc03Recommendation?.required ? '⚠️ DRC-03 Adjustment Recommended' : '✓ Full Annual Reconciliation Alignment'}
-                </div>
-                <div style={{ fontSize: 13, color: '#334155', marginTop: 4 }}>
-                  {gstr9Data.drc03Recommendation?.reason}
-                </div>
-              </div>
+              <Callout
+                tone={gstr9Data.drc03Recommendation?.required ? 'risk' : 'success'}
+                icon={gstr9Data.drc03Recommendation?.required ? '⚠️' : '✓'}
+                title={gstr9Data.drc03Recommendation?.required ? 'DRC-03 Adjustment Recommended' : 'Full Annual Reconciliation Alignment'}
+                description={gstr9Data.drc03Recommendation?.reason}
+                style={{ marginBottom: 20 }}
+              />
 
               <div className="grid-3" style={{ marginBottom: 20 }}>
                 <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase' }}>Table 4: Total Outward Turnover</div>
+                  <div className="section-label">Table 4: Total Outward Turnover</div>
                   <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>
                     ₹ {Number(gstr9Data.table4_outward?.totalTaxable || 0).toLocaleString('en-IN')}
                   </div>
@@ -385,8 +492,8 @@ export default function Returns() {
                 </div>
 
                 <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase' }}>Table 6: ITC Availed in GSTR-3B</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, color: 'var(--teal)' }}>
+                  <div className="section-label">Table 6: ITC Availed in GSTR-3B</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, color: 'var(--teal-ink)' }}>
                     ₹ {Number(gstr9Data.table6_itc?.table6A_totalFrom3B || 0).toLocaleString('en-IN')}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
@@ -395,7 +502,7 @@ export default function Returns() {
                 </div>
 
                 <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase' }}>Table 8D: 2B vs 3B Variance</div>
+                  <div className="section-label">Table 8D: 2B vs 3B Variance</div>
                   <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, color: gstr9Data.table8_comparison?.table8D_difference < 0 ? 'var(--red)' : 'var(--teal)' }}>
                     {gstr9Data.table8_comparison?.table8D_difference >= 0 ? '+' : ''}
                     ₹ {Number(gstr9Data.table8_comparison?.table8D_difference || 0).toLocaleString('en-IN')}
@@ -408,7 +515,7 @@ export default function Returns() {
 
               {gstr9Data.gstr9c && (
                 <div style={{ background: '#f1f5f9', padding: 16, borderRadius: 8, marginBottom: 20, border: '1px solid #cbd5e1' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
                     <div>
                       <h4 style={{ margin: 0 }}>GSTR-9C Statutory Reconciliation Ledger (Section 44(2))</h4>
                       <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
@@ -448,9 +555,13 @@ export default function Returns() {
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                <button className="btn outline small" onClick={() => window.print()}>🖨️ Print GSTR-9/9C Audit Packet</button>
-                <button className="btn small" onClick={() => alert('GSTR-9 / 9C JSON payload prepared for filing!')}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+                <button type="button" className="btn outline small" onClick={() => window.print()}>🖨️ Print GSTR-9/9C Audit Packet</button>
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => toast.success('GSTR-9 / 9C JSON prepared', 'The annual return payload is ready for filing on the GST portal.')}
+                >
                   Generate Official GSTR-9/9C JSON
                 </button>
               </div>
@@ -459,39 +570,49 @@ export default function Returns() {
         </div>
       )}
 
-      {/* EVC (OTP) Filing Modal */}
-      {evcModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'grid', placeItems: 'center' }}>
-          <div className="card" style={{ width: '90%', maxWidth: 460, background: '#fff' }}>
-            <div className="card-header">
-              <h3>File {evcModal.type} with EVC (Electronic Verification)</h3>
-              <button className="close-btn" onClick={() => setEvcModal(null)}>✕</button>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-              A simulated One-Time Password (OTP) has been sent to the authorized signatory mobile registered with GSTN for GSTIN <strong>{evcModal.companyGstin}</strong>.
-            </p>
-            <div className="form-group" style={{ marginBottom: 16 }}>
-              <label className="input-label">Enter 6-Digit EVC OTP</label>
-              <input
-                className="input"
-                placeholder="e.g. 782109"
-                value={otp}
-                onChange={e => setOtp(e.target.value)}
-                autoFocus
-              />
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                Hint: Any 6 digits for simulated verification (e.g. 123456)
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button type="button" className="btn outline small" onClick={() => setEvcModal(null)}>Cancel</button>
-              <button type="button" className="btn small" onClick={handleFileReturn}>
-                Verify & Submit Return
-              </button>
-            </div>
+      <Modal
+        open={!!evcModal}
+        onClose={() => setEvcModal(null)}
+        title={evcModal ? `File ${evcModal.type} with EVC` : 'File with EVC'}
+        subtitle={evcModal ? `Electronic Verification Code · Period ${evcModal.period}` : ''}
+        maxWidth={460}
+        footer={
+          <>
+            <button type="button" className="btn ghost small" onClick={() => setEvcModal(null)} disabled={filing}>
+              Cancel
+            </button>
+            <button type="button" className="btn small" onClick={handleFileReturn} disabled={filing}>
+              {filing ? (
+                <>
+                  <span className="spinner sm" aria-hidden="true" />
+                  Submitting…
+                </>
+              ) : (
+                'Verify & Submit Return'
+              )}
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+          A simulated One-Time Password (OTP) has been sent to the authorized signatory mobile registered with GSTN for GSTIN{' '}
+          <strong className="mono">{evcModal?.companyGstin}</strong>.
+        </p>
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="input-label" htmlFor="evc-otp">Enter 6-Digit EVC OTP</label>
+          <input
+            id="evc-otp"
+            className="input"
+            placeholder="e.g. 782109"
+            value={otp}
+            onChange={e => setOtp(e.target.value)}
+            autoFocus
+          />
+          <div className="form-hint">
+            Hint: Any 6 digits for simulated verification (e.g. 123456)
           </div>
         </div>
-      )}
+      </Modal>
     </>
   );
 }

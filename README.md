@@ -77,7 +77,7 @@ A comprehensive, tiered full-stack MERN application for managing Goods and Servi
 | -------- | ----------------------------------- |
 | Frontend | React 18, React Router 6, Vite      |
 | Backend  | Node.js, Express 4                  |
-| Database | MongoDB, Mongoose 8 (Port 27018)    |
+| Database | MongoDB, Mongoose 8 (Local port 27019) |
 | Auth     | JWT (jsonwebtoken + bcryptjs)       |
 | QR Engine| qrcode (IRP Signed QR & Dynamic UPI)|
 | Styling  | Custom CSS (design-system tokens)   |

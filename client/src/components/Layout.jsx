@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -51,74 +51,131 @@ const PAGE_META = {
   '/reports': ['HSN & Tax Collections Report', 'Turnover analytics, HSN sales breakdown & rate-wise distribution'],
 };
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const onChange = (e) => setIsMobile(e.matches);
+    mq.addEventListener('change', onChange);
+    setIsMobile(mq.matches);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return isMobile;
+}
+
 export default function Layout() {
   const { user, logout } = useAuth();
   const location = useLocation();
+  const isMobile = useIsMobile();
   const [title, sub] = PAGE_META[location.pathname] || ['GST Manager (2026 Edition)', ''];
-  const initials = user?.name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'U';
+  const initials =
+    user?.name?.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'U';
 
   const companyGstins = user?.company?.gstins || [];
-  const dynamicBranches = companyGstins.length > 0
-    ? [
-        ...companyGstins.map(g => ({
-          gstin: g.gstin,
-          label: `${g.gstin} (${g.tradeName || g.state || 'Branch'})`,
-          state: g.state,
-        })),
-        { gstin: 'ALL', label: '🌐 All Branches (Consolidated)', state: 'Pan-India' },
-      ]
-    : [
-        { gstin: 'DEFAULT', label: user?.company?.name || 'Primary Corporate Unit', state: 'Head Office' }
-      ];
+  const dynamicBranches =
+    companyGstins.length > 0
+      ? [
+          ...companyGstins.map((g) => ({
+            gstin: g.gstin,
+            label: `${g.gstin} (${g.tradeName || g.state || 'Branch'})`,
+            state: g.state,
+          })),
+          { gstin: 'ALL', label: '🌐 All Branches (Consolidated)', state: 'Pan-India' },
+        ]
+      : [{ gstin: 'DEFAULT', label: user?.company?.name || 'Primary Corporate Unit', state: 'Head Office' }];
 
-  const [activeBranch, setActiveBranch] = useState(() => {
-    return localStorage.getItem('gst_active_branch') || (companyGstins[0]?.gstin || 'ALL');
-  });
-
+  const [activeBranch, setActiveBranch] = useState(
+    () => localStorage.getItem('gst_active_branch') || companyGstins[0]?.gstin || 'ALL',
+  );
   const handleBranchChange = (e) => {
-    const val = e.target.value;
-    setActiveBranch(val);
-    localStorage.setItem('gst_active_branch', val);
+    setActiveBranch(e.target.value);
+    localStorage.setItem('gst_active_branch', e.target.value);
   };
 
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (typeof window !== 'undefined' && window.innerWidth < 768) {
-      return false;
-    }
-    const saved = localStorage.getItem('gst_sidebar_open');
-    return saved !== null ? saved === 'true' : true;
+  // desktop: 'full' | 'rail' — mobile: drawer open/closed
+  const [rail, setRail] = useState(() => {
+    const savedMode = localStorage.getItem('gst_sidebar_mode');
+    if (savedMode) return savedMode === 'rail';
+    const savedOpen = localStorage.getItem('gst_sidebar_open');
+    return savedOpen !== null ? savedOpen !== 'true' : false;
   });
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  const sidebarOpen = isMobile ? drawerOpen : !rail;
 
   const toggleSidebar = () => {
-    setSidebarOpen(prev => {
+    if (isMobile) {
+      setDrawerOpen((v) => !v);
+      return;
+    }
+    setRail((prev) => {
       const next = !prev;
-      localStorage.setItem('gst_sidebar_open', String(next));
+      localStorage.setItem('gst_sidebar_mode', next ? 'rail' : 'full');
+      localStorage.setItem('gst_sidebar_open', String(!next));
       return next;
     });
   };
 
-  // Close sidebar on mobile navigation
+  // close drawer + menu on navigation
   useEffect(() => {
-    if (window.innerWidth < 768) {
-      setSidebarOpen(false);
-    }
+    setDrawerOpen(false);
+    setMenuOpen(false);
   }, [location.pathname]);
+
+  // keep the active nav item visible inside the sidebar list
+  useEffect(() => {
+    const nav = document.querySelector('.nav-scroll');
+    const item = nav?.querySelector('.nav-item.active');
+    if (!nav || !item) return;
+    const nr = nav.getBoundingClientRect();
+    const ir = item.getBoundingClientRect();
+    if (ir.top < nr.top + 8) nav.scrollTop -= nr.top + 8 - ir.top;
+    else if (ir.bottom > nr.bottom - 8) nav.scrollTop += ir.bottom - nr.bottom + 8;
+  }, [location.pathname]);
+
+  // close the user menu on outside click / Escape
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onDocClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+
+  const mainClass = isMobile
+    ? 'main'
+    : rail
+      ? 'main rail-offset'
+      : 'main';
 
   return (
     <div className="main-layout">
-      {/* Mobile backdrop overlay */}
-      {sidebarOpen && (
-        <div
-          className="sidebar-backdrop"
-          onClick={() => setSidebarOpen(false)}
-          aria-hidden="true"
-        />
+      {isMobile && drawerOpen && (
+        <div className="sidebar-backdrop" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
       )}
 
-      <aside className={`sidebar ${!sidebarOpen ? 'collapsed' : ''}`}>
+      <aside
+        className={[
+          'sidebar',
+          isMobile ? (drawerOpen ? '' : 'collapsed') : rail ? 'rail' : '',
+        ].join(' ').trim()}
+        aria-label="Primary"
+      >
         <div className="brand">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="logo">G</div>
+          <div className="brand-lockup">
+            <div className="logo" aria-hidden="true">G</div>
             <div>
               <div className="name">GST Manager</div>
               <div className="sub">2026 Enterprise Edition</div>
@@ -127,98 +184,124 @@ export default function Layout() {
           <button
             className="sidebar-close-btn"
             onClick={toggleSidebar}
-            title="Hide sidebar"
-            aria-label="Hide sidebar"
+            title={isMobile ? 'Close menu' : 'Collapse sidebar'}
+            aria-label={isMobile ? 'Close menu' : 'Collapse sidebar'}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         </div>
 
-        <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
+        <nav className="nav-scroll" aria-label="Main navigation">
           {NAV_ITEMS.map((item, i) =>
             item.section ? (
-              <div key={i} className="nav-label">{item.section}</div>
+              <div key={`s-${i}`} className="nav-label">{item.section}</div>
             ) : (
               <NavLink
                 key={item.to}
                 to={item.to}
                 end={item.to === '/'}
+                title={!sidebarOpen || rail ? item.label : undefined}
                 className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
               >
-                <span className="icon">{item.icon}</span> {item.label}
+                <span className="icon" aria-hidden="true">{item.icon}</span>
+                <span className="nav-text">{item.label}</span>
               </NavLink>
-            )
+            ),
           )}
-        </div>
+        </nav>
 
         <div className="sidebar-footer">
-          <div><strong>{user?.name}</strong></div>
-          <div style={{ fontSize: 11, color: '#94a3b8' }}>{user?.role?.toUpperCase()} · {user?.company?.name || 'Enterprise'}</div>
-          <button className="link" onClick={logout} style={{ background: 'none', border: 'none', marginTop: 6, color: '#f87171' }}>
-            Sign out
-          </button>
+          <div className="sidebar-user">
+            <div className="avatar" aria-hidden="true">{initials}</div>
+            <div className="who">
+              <div className="n">{user?.name || 'User'}</div>
+              <div className="r">
+                {user?.role?.toUpperCase()} · {user?.company?.name || 'Enterprise'}
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
 
-      <main className={`main ${!sidebarOpen ? 'expanded' : ''}`}>
-        <div className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <main className={mainClass} id="main-content">
+        <header className="topbar">
+          <div className="topbar-left">
             <button
               className="sidebar-toggle-btn"
               onClick={toggleSidebar}
-              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-              aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+              title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+              aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+              aria-expanded={sidebarOpen}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="3" y1="12" x2="21" y2="12"></line>
-                <line x1="3" y1="6" x2="21" y2="6"></line>
-                <line x1="3" y1="18" x2="21" y2="18"></line>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                <line x1="9" y1="4" x2="9" y2="20" />
               </svg>
-              <span>{sidebarOpen ? 'Hide' : 'Menu'}</span>
+              <span className="hidden sm:inline">{sidebarOpen ? 'Collapse' : 'Menu'}</span>
             </button>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <h1>{title}</h1>
               <div className="sub">{sub}</div>
             </div>
           </div>
-          <div className="company" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 13 }} title="Multi-GSTIN Branch Switcher">🏢</span>
+
+          <div className="topbar-right">
+            <div className="branch-picker">
+              <span className="bp-icon" aria-hidden="true" title="Multi-GSTIN branch switcher">🏢</span>
               <select
+                className="branch-select"
                 value={activeBranch}
                 onChange={handleBranchChange}
-                aria-label="Multi-GSTIN Corporate Portal Switcher"
-                style={{
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid #cbd5e1',
-                  background: '#f8fafc',
-                  color: '#1e293b',
-                  cursor: 'pointer',
-                  outline: 'none',
-                }}
+                aria-label="Multi-GSTIN corporate portal switcher"
               >
-                {dynamicBranches.map(b => (
+                {dynamicBranches.map((b) => (
                   <option key={b.gstin} value={b.gstin}>
                     {b.label}
                   </option>
                 ))}
               </select>
             </div>
-            <div className="avatar">{initials}</div>
-            <div>
-              <div style={{ fontWeight: 600, color: 'var(--text)' }}>{user?.name || 'User'}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>FY 2025-26</div>
+
+            <span className="fy-chip" title="Current financial year">FY 2025-26</span>
+
+            <div className={`user-menu${menuOpen ? ' open' : ''}`} ref={menuRef}>
+              <button
+                className="user-trigger"
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                aria-label="Account menu"
+              >
+                <span className="avatar" aria-hidden="true">{initials}</span>
+                <span className="uname">{user?.name || 'User'}</span>
+                <svg className="caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+              {menuOpen && (
+                <div className="dropdown" role="menu">
+                  <div className="dropdown-head">
+                    <div className="dn">{user?.name || 'User'}</div>
+                    <div className="de">{user?.email || ''}</div>
+                  </div>
+                  <div className="dropdown-item" role="menuitem" style={{ cursor: 'default' }}>
+                    <span aria-hidden="true">🛡️</span>
+                    <span>{user?.role === 'admin' ? 'Administrator' : user?.role || 'Member'}</span>
+                  </div>
+                  <button className="dropdown-item danger" role="menuitem" onClick={logout}>
+                    <span aria-hidden="true">⏻</span>
+                    <span>Sign out</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        </header>
 
-        <div className="content">
+        <div className="content page-enter" key={location.pathname}>
           <Outlet />
         </div>
       </main>

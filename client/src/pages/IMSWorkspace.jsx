@@ -1,7 +1,25 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
+import { StatCard, Callout, SkeletonCard, SkeletonTable, EmptyState, ErrorState, Modal } from '../components/ui';
+import { useToast } from '../components/Toast';
+
+const TABS = [
+  { id: 'all', label: 'All Invoices' },
+  { id: 'pending', label: 'Pending Action' },
+  { id: 'accepted', label: 'Accepted' },
+  { id: 'rejected', label: 'Rejected' },
+];
+
+const REJECT_REASONS = [
+  'Goods or services not received / Incorrect invoice details',
+  'Incorrect recipient GSTIN / Wrong customer',
+  'Duplicate invoice entered by supplier',
+  'Mismatched tax rates or wrong HSN computation',
+  'Commercial dispute / Pending credit note',
+];
 
 export default function IMSWorkspace() {
+  const toast = useToast();
   const [period, setPeriod] = useState('2026-09');
   const [filterState, setFilterState] = useState('all');
   const [search, setSearch] = useState('');
@@ -9,15 +27,18 @@ export default function IMSWorkspace() {
   const [summary, setSummary] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [acting, setActing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [confirmSyncOpen, setConfirmSyncOpen] = useState(false);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
-  const [rejectReason, setRejectReason] = useState('Goods or services not received / Incorrect invoice details');
+  const [rejectReason, setRejectReason] = useState(REJECT_REASONS[0]);
   const [targetRejectIds, setTargetRejectIds] = useState([]);
 
   const loadData = () => {
     setLoading(true);
+    setError(null);
     const query = new URLSearchParams({
       period,
       imsState: filterState,
@@ -32,7 +53,7 @@ export default function IMSWorkspace() {
         setSelectedIds([]);
       })
       .catch((err) => {
-        console.error('Failed to load IMS docs:', err);
+        setError(err);
       })
       .finally(() => setLoading(false));
   };
@@ -69,10 +90,13 @@ export default function IMSWorkspace() {
         action,
         rejectedReason: reason,
       });
-      alert(res.message || `Invoices successfully marked as ${action}`);
+      toast.success(
+        res.message || `Marked ${docIds.length} invoice(s) as ${action}`,
+        `${period} IMS determinations updated.`
+      );
       loadData();
     } catch (err) {
-      alert(err.message || 'Failed to update IMS state');
+      toast.error('Failed to update IMS state', err.message);
     } finally {
       setActing(false);
       setRejectModalOpen(false);
@@ -84,17 +108,20 @@ export default function IMSWorkspace() {
     setRejectModalOpen(true);
   };
 
-  const handleSyncPortal = async () => {
-    if (!window.confirm(`Push all ${period} IMS determinations to the GSTN Portal? This locks your GSTR-2B inward ITC register.`)) {
-      return;
-    }
+  const handleSyncPortal = () => {
+    setConfirmSyncOpen(true);
+  };
+
+  const handleConfirmSyncPortal = async () => {
+    setConfirmSyncOpen(false);
     setSyncing(true);
     try {
       const res = await api.post('/ims/sync-portal', { period });
       setSyncResult(res.syncSummary);
+      toast.success('GSTN IMS sync complete', `${period} determinations pushed to the portal.`);
       loadData();
     } catch (err) {
-      alert(err.message || 'Failed to sync with GSTN portal');
+      toast.error('Failed to sync with GSTN portal', err.message);
     } finally {
       setSyncing(false);
     }
@@ -178,368 +205,453 @@ export default function IMSWorkspace() {
         period,
         documents: sampleDocs,
       });
-      alert('Sample GSTR-2B / IMS Inward documents seeded successfully!');
+      toast.success('Sample GSTR-2B / IMS documents seeded', `${sampleDocs.length} inward records loaded for ${period}.`);
       loadData();
     } catch (err) {
-      alert(err.message || 'Failed to seed sample documents');
+      toast.error('Failed to seed sample documents', err.message);
     }
   };
 
+  const activeTabLabel = TABS.find((t) => t.id === filterState)?.label || 'All Invoices';
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900">Native IMS Workspace</h1>
-            <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
-              Rule 36(4) Compliant
-            </span>
+          <div className="section-label">
+            Invoice Management System · Rule 36(4)
+            <span className="badge violet">Rule 36(4) Compliant</span>
           </div>
-          <p className="text-sm text-gray-500 mt-1">
-            Invoice Management System for statutory inward supply review, bulk acceptance, rejection, and 14th-of-month GSTN sync.
-          </p>
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+            Statutory inward supply review — accept, reject or hold supplier invoices, then push determinations to GSTN by the 14th of the month.
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="month"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm bg-white shadow-sm"
-          />
+        <div className="flex items-end gap-2">
+          <div>
+            <label className="input-label" htmlFor="ims-period">Return period</label>
+            <input
+              id="ims-period"
+              type="month"
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="input"
+              style={{ width: 156 }}
+            />
+          </div>
           <button
+            type="button"
             onClick={seedSampleDocs}
             title="Load sample inward 2B records for walkthrough / testing"
-            className="px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 shadow-sm"
+            className="btn outline"
           >
-            Load Demo Template
+            Load demo template
           </button>
           <button
+            type="button"
             onClick={handleSyncPortal}
             disabled={syncing}
-            className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow flex items-center gap-1.5"
+            className="btn"
           >
-            {syncing ? 'Pushing to GSTN...' : '⚡ Push Decisions to GSTN'}
+            {syncing ? (
+              <>
+                <span className="spinner sm" aria-hidden="true" />
+                Pushing to GSTN…
+              </>
+            ) : (
+              '⚡ Push Decisions to GSTN'
+            )}
           </button>
         </div>
+      </div>
+
+      <div role="status" aria-live="polite" style={{ fontSize: 12.5, color: 'var(--muted)', minHeight: 16 }}>
+        {syncing
+          ? `Pushing ${period} IMS determinations to GSTN…`
+          : acting
+            ? 'Updating invoice determinations…'
+            : loading
+              ? 'Loading inward supplier documents…'
+              : ''}
       </div>
 
       {/* Sync Banner if just synced */}
       {syncResult && (
-        <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 flex items-start justify-between shadow-sm">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-emerald-800">✅ Official GSTN IMS Sync Complete</span>
-              <span className="text-xs bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded font-mono">
-                ACK: {syncResult.ackId}
-              </span>
-            </div>
-            <p className="text-xs text-emerald-700 mt-1">
-              Synced {syncResult.totalPushed} documents for {syncResult.period}. Accepted ITC:{' '}
-              <b>₹{syncResult.accepted.itcValue.toLocaleString('en-IN')}</b> ({syncResult.accepted.count} docs) | Rejected:{' '}
-              <b>{syncResult.rejected.count}</b> docs | Pending: <b>{syncResult.pending.count}</b> docs.
-            </p>
-          </div>
-          <button onClick={() => setSyncResult(null)} className="text-xs text-emerald-600 hover:underline">
-            Dismiss
-          </button>
+        <div aria-live="polite">
+          <Callout
+            tone="success"
+            icon="✅"
+            title={
+              <>
+                Official GSTN IMS Sync Complete{' '}
+                <span className="badge green mono" style={{ marginLeft: 6 }}>
+                  ACK: {syncResult.ackId}
+                </span>
+              </>
+            }
+            description={
+              <>
+                Synced {syncResult.totalPushed} documents for {syncResult.period}. Accepted ITC:{' '}
+                <strong>₹{(syncResult.accepted?.itcValue || 0).toLocaleString('en-IN')}</strong> (
+                {syncResult.accepted?.count || 0} docs) · Rejected: <strong>{syncResult.rejected?.count || 0}</strong>{' '}
+                docs · Pending: <strong>{syncResult.pending?.count || 0}</strong> docs.
+              </>
+            }
+            actions={
+              <button type="button" className="btn ghost small" onClick={() => setSyncResult(null)}>
+                Dismiss
+              </button>
+            }
+          />
         </div>
       )}
 
       {/* KPI Cards */}
-      {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="p-4 rounded-xl border border-gray-200 bg-white shadow-sm">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Inward Docs</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{summary.totalCount}</p>
-            <p className="text-xs text-gray-500 mt-1">
-              Taxable: ₹{summary.totalTaxable.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </p>
-          </div>
-          <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-emerald-700 uppercase tracking-wider">Accepted for ITC</p>
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-            </div>
-            <p className="text-2xl font-bold text-emerald-900 mt-1">{summary.acceptedCount}</p>
-            <p className="text-xs text-emerald-700 font-medium mt-1">
-              ITC: ₹{summary.acceptedITC.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </p>
-          </div>
-          <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/50 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">Pending Decision</p>
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-            </div>
-            <p className="text-2xl font-bold text-amber-900 mt-1">{summary.pendingCount}</p>
-            <p className="text-xs text-amber-700 font-medium mt-1">
-              ITC: ₹{summary.pendingITC.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </p>
-          </div>
-          <div className="p-4 rounded-xl border border-rose-200 bg-rose-50/50 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-rose-700 uppercase tracking-wider">Rejected</p>
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-            </div>
-            <p className="text-2xl font-bold text-rose-900 mt-1">{summary.rejectedCount}</p>
-            <p className="text-xs text-rose-700 font-medium mt-1">
-              Blocked ITC: ₹{summary.rejectedITC.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </p>
+      {loading && !summary ? (
+        <div className="grid-4">
+          {[0, 1, 2, 3].map((i) => (
+            <SkeletonCard key={i} height={124} />
+          ))}
+        </div>
+      ) : summary ? (
+        <div className="grid-4">
+          <StatCard
+            label="Total Inward Docs"
+            icon="📥"
+            value={summary.totalCount}
+            delta={`Taxable: ₹${(summary.totalTaxable || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+          />
+          <StatCard
+            label="Accepted for ITC"
+            icon="✅"
+            accent="teal"
+            value={summary.acceptedCount}
+            delta={`ITC: ₹${(summary.acceptedITC || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+            deltaClass="up"
+          />
+          <StatCard
+            label="Pending Decision"
+            icon="⏳"
+            accent="amber"
+            value={summary.pendingCount}
+            delta={`ITC: ₹${(summary.pendingITC || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+            deltaClass="amber-text"
+          />
+          <StatCard
+            label="Rejected"
+            icon="⛔"
+            value={<span style={{ color: 'var(--red)' }}>{summary.rejectedCount}</span>}
+            delta={`Blocked ITC: ₹${(summary.rejectedITC || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+            deltaClass="down"
+          />
+        </div>
+      ) : null}
+
+      {/* Filter toolbar */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="seg" role="group" aria-label="Filter invoices by IMS state">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              aria-pressed={filterState === tab.id}
+              className={filterState === tab.id ? 'active' : ''}
+              onClick={() => setFilterState(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+          <input
+            id="ims-search"
+            type="search"
+            aria-label="Search invoice number, GSTIN or supplier"
+            placeholder="Search Invoice #, GSTIN, Supplier…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="input"
+            style={{ width: 260 }}
+          />
+          <button type="submit" className="btn outline small">
+            Filter
+          </button>
+        </form>
+      </div>
+
+      {/* Selected Rows Action Bar */}
+      {selectedIds.length > 0 && (
+        <div
+          className="flex items-center justify-between gap-3 flex-wrap rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="text-xs font-semibold text-indigo-900">
+            {selectedIds.length} of {documents.length} invoice(s) selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => performAction(selectedIds, 'accepted')}
+              disabled={acting}
+              className="btn success small"
+            >
+              ✓ Bulk Accept
+            </button>
+            <button
+              type="button"
+              onClick={() => performAction(selectedIds, 'pending')}
+              disabled={acting}
+              className="btn outline small"
+            >
+              ⏸ Keep Pending
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenReject(selectedIds)}
+              disabled={acting}
+              className="btn danger small"
+            >
+              ✕ Bulk Reject
+            </button>
           </div>
         </div>
       )}
 
-      {/* Filter and Bulk Action Toolbar */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Tabs */}
-          <div className="flex items-center gap-1 border-b md:border-b-0 pb-2 md:pb-0">
-            {[
-              { id: 'all', label: 'All Invoices' },
-              { id: 'pending', label: 'Pending Action' },
-              { id: 'accepted', label: 'Accepted' },
-              { id: 'rejected', label: 'Rejected' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setFilterState(tab.id)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                  filterState === tab.id
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+      {/* Documents Table */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title-row">
+            <span className="dot" />
+            <h3>Inward Supplier Documents · {period}</h3>
           </div>
-
-          {/* Search Bar */}
-          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
-            <input
-              type="text"
-              placeholder="Search Invoice #, GSTIN, Supplier..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="text-xs border border-gray-300 rounded-lg px-3 py-1.5 w-64 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-            <button
-              type="submit"
-              className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium"
-            >
-              Filter
-            </button>
-          </form>
+          {!loading && !error && documents.length > 0 ? (
+            <span className="badge gray">{documents.length} docs · {activeTabLabel}</span>
+          ) : null}
         </div>
 
-        {/* Selected Rows Action Bar */}
-        {selectedIds.length > 0 && (
-          <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2 mt-2">
-            <span className="text-xs font-semibold text-indigo-900">
-              {selectedIds.length} invoice(s) selected
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => performAction(selectedIds, 'accepted')}
-                disabled={acting}
-                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium shadow-sm"
-              >
-                ✓ Bulk Accept
-              </button>
-              <button
-                onClick={() => performAction(selectedIds, 'pending')}
-                disabled={acting}
-                className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-medium shadow-sm"
-              >
-                ⏸ Keep Pending
-              </button>
-              <button
-                onClick={() => handleOpenReject(selectedIds)}
-                disabled={acting}
-                className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-medium shadow-sm"
-              >
-                ✕ Bulk Reject
-              </button>
+        {loading ? (
+          <SkeletonTable rows={6} cols={7} />
+        ) : error ? (
+          <ErrorState error={error} onRetry={loadData} title="Could not load inward documents" />
+        ) : documents.length === 0 ? (
+          <EmptyState
+            icon="📥"
+            title={`No inward documents for ${period}`}
+            description={
+              filterState === 'all'
+                ? 'Inward GSTR-2B invoices appear here after a GSTN portal sync or an upload. Each decision you take is reported back to the supplier and drives your Rule 36(4) eligible ITC.'
+                : `Nothing matches the "${activeTabLabel}" view for ${period}. Switch back to All Invoices, sync the GSTN portal, or load the demo template to try the accept / reject workflow.`
+            }
+            action={{ label: 'Load demo template', onClick: seedSampleDocs }}
+            secondaryAction={{ label: 'Run 2B reconciliation', to: '/recon' }}
+          />
+        ) : (
+          <>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="w-8">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all invoices on this page"
+                        checked={documents.length > 0 && selectedIds.length === documents.length}
+                        onChange={handleSelectAll}
+                      />
+                    </th>
+                    <th>Invoice No / Date</th>
+                    <th>Supplier Info</th>
+                    <th>Doc Type</th>
+                    <th className="num">Taxable Value</th>
+                    <th className="num">Tax (ITC)</th>
+                    <th>IMS Status</th>
+                    <th>Quick Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {documents.map((doc) => {
+                    const itc = (doc.igst || 0) + (doc.cgst || 0) + (doc.sgst || 0) + (doc.cess || 0) || (doc.gst || 0);
+                    const isSelected = selectedIds.includes(doc._id);
+
+                    let statusBadge = 'badge amber';
+                    let statusLabel = 'Pending';
+                    if (doc.imsState === 'accepted') {
+                      statusBadge = 'badge green';
+                      statusLabel = 'Accepted';
+                    } else if (doc.imsState === 'rejected') {
+                      statusBadge = 'badge red';
+                      statusLabel = 'Rejected';
+                    }
+
+                    return (
+                      <tr key={doc._id} className={isSelected ? 'bg-indigo-50/40' : undefined}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select invoice ${doc.invoiceNo}`}
+                            checked={isSelected}
+                            onChange={() => handleToggleRow(doc._id)}
+                          />
+                        </td>
+                        <td>
+                          <strong>{doc.invoiceNo}</strong>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                            {doc.docDate ? new Date(doc.docDate).toLocaleDateString('en-IN') : '—'}
+                          </div>
+                        </td>
+                        <td>
+                          <strong>{doc.supplierName || 'Unknown Vendor'}</strong>
+                          <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
+                            {doc.supplierGstin}
+                          </div>
+                        </td>
+                        <td>
+                          <span className="badge gray" style={{ textTransform: 'capitalize' }}>
+                            {doc.docType}
+                          </span>
+                        </td>
+                        <td className="num">₹{(doc.taxableValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                        <td className="num" style={{ color: 'var(--primary)', fontWeight: 650 }}>
+                          ₹{itc.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td>
+                          <span className={statusBadge}>{statusLabel}</span>
+                          {doc.rejectedReason && (
+                            <div
+                              style={{ fontSize: 11, color: 'var(--red)', maxWidth: 170 }}
+                              title={doc.rejectedReason}
+                            >
+                              {doc.rejectedReason}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <div className="row-actions">
+                            <button
+                              type="button"
+                              title="Accept for GSTR-2B"
+                              aria-label={`Accept invoice ${doc.invoiceNo} for GSTR-2B`}
+                              onClick={() => performAction([doc._id], 'accepted')}
+                              disabled={acting}
+                              className="btn ghost small"
+                              style={{ color: 'var(--teal-ink)', padding: '0 8px' }}
+                            >
+                              ✓
+                            </button>
+                            <button
+                              type="button"
+                              title="Keep Pending"
+                              aria-label={`Keep invoice ${doc.invoiceNo} pending`}
+                              onClick={() => performAction([doc._id], 'pending')}
+                              disabled={acting}
+                              className="btn ghost small"
+                              style={{ color: 'var(--amber-ink)', padding: '0 8px' }}
+                            >
+                              ⏸
+                            </button>
+                            <button
+                              type="button"
+                              title="Reject"
+                              aria-label={`Reject invoice ${doc.invoiceNo}`}
+                              onClick={() => handleOpenReject([doc._id])}
+                              disabled={acting}
+                              className="btn ghost small"
+                              style={{ color: 'var(--red)', padding: '0 8px' }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
+            <div className="table-meta">
+              <span>
+                {selectedIds.length > 0
+                  ? `${selectedIds.length} of ${documents.length} selected`
+                  : `${documents.length} document(s) shown`}
+              </span>
+              <span>
+                {summary ? `Accepted ${summary.acceptedCount} · Pending ${summary.pendingCount} · Rejected ${summary.rejectedCount}` : ''}
+              </span>
+            </div>
+          </>
         )}
       </div>
 
-      {/* Documents Table */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-xs">
-            <thead className="bg-gray-50 text-gray-600 uppercase font-semibold">
-              <tr>
-                <th className="px-4 py-3 text-left w-8">
-                  <input
-                    type="checkbox"
-                    checked={documents.length > 0 && selectedIds.length === documents.length}
-                    onChange={handleSelectAll}
-                    className="rounded border-gray-300 text-indigo-600"
-                  />
-                </th>
-                <th className="px-4 py-3 text-left">Invoice No / Date</th>
-                <th className="px-4 py-3 text-left">Supplier Info</th>
-                <th className="px-4 py-3 text-left">Doc Type</th>
-                <th className="px-4 py-3 text-right">Taxable Value</th>
-                <th className="px-4 py-3 text-right">Tax (ITC)</th>
-                <th className="px-4 py-3 text-center">IMS Status</th>
-                <th className="px-4 py-3 text-center">Quick Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
-                    Loading inward supplier documents...
-                  </td>
-                </tr>
-              ) : documents.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
-                    No inward supplier documents found for {period} ({filterState}). Inward GSTR-2B invoices will appear here upon portal sync or upload.
-                  </td>
-                </tr>
-              ) : (
-                documents.map((doc) => {
-                  const itc = (doc.igst || 0) + (doc.cgst || 0) + (doc.sgst || 0) + (doc.cess || 0) || (doc.gst || 0);
-                  const isSelected = selectedIds.includes(doc._id);
-
-                  let badgeColor = 'bg-amber-100 text-amber-800 border-amber-200';
-                  let statusLabel = 'Pending';
-                  if (doc.imsState === 'accepted') {
-                    badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
-                    statusLabel = 'Accepted';
-                  } else if (doc.imsState === 'rejected') {
-                    badgeColor = 'bg-rose-100 text-rose-800 border-rose-200';
-                    statusLabel = 'Rejected';
-                  }
-
-                  return (
-                    <tr key={doc._id} className={isSelected ? 'bg-indigo-50/40' : 'hover:bg-gray-50'}>
-                      <td className="px-4 py-3">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleRow(doc._id)}
-                          className="rounded border-gray-300 text-indigo-600"
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="font-semibold text-gray-900">{doc.invoiceNo}</p>
-                        <p className="text-gray-500">
-                          {doc.docDate ? new Date(doc.docDate).toLocaleDateString('en-IN') : '—'}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-900">{doc.supplierName || 'Unknown Vendor'}</p>
-                        <p className="font-mono text-gray-500 text-[11px]">{doc.supplierGstin}</p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="capitalize px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-[11px]">
-                          {doc.docType}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono">
-                        ₹{(doc.taxableValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono font-medium text-indigo-600">
-                        ₹{itc.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${badgeColor}`}>
-                          {statusLabel}
-                        </span>
-                        {doc.rejectedReason && (
-                          <p className="text-[10px] text-rose-600 max-w-[150px] truncate mt-0.5" title={doc.rejectedReason}>
-                            {doc.rejectedReason}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            title="Accept for GSTR-2B"
-                            onClick={() => performAction([doc._id], 'accepted')}
-                            className="p-1 rounded text-emerald-600 hover:bg-emerald-50 text-xs font-bold"
-                          >
-                            ✓
-                          </button>
-                          <button
-                            title="Keep Pending"
-                            onClick={() => performAction([doc._id], 'pending')}
-                            className="p-1 rounded text-amber-600 hover:bg-amber-50 text-xs font-bold"
-                          >
-                            ⏸
-                          </button>
-                          <button
-                            title="Reject"
-                            onClick={() => handleOpenReject([doc._id])}
-                            className="p-1 rounded text-rose-600 hover:bg-rose-50 text-xs font-bold"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* Sync confirmation */}
+      <Modal
+        open={confirmSyncOpen}
+        onClose={() => setConfirmSyncOpen(false)}
+        title="Push decisions to the GSTN portal?"
+        subtitle={`IMS determinations for ${period}`}
+        maxWidth={520}
+        footer={
+          <>
+            <button type="button" className="btn ghost" onClick={() => setConfirmSyncOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn" onClick={handleConfirmSyncPortal} disabled={syncing}>
+              {syncing ? 'Pushing…' : '⚡ Push to GSTN'}
+            </button>
+          </>
+        }
+      >
+        <Callout
+          tone="risk"
+          icon="🔒"
+          title="This locks your GSTR-2B inward ITC register for the period"
+          description="Accepted invoices become claimable ITC, rejections are reported back to the supplier, and pending items stay visible until the next IMS window. Review your selection before pushing."
+        />
+      </Modal>
 
       {/* Rejection Modal */}
-      {rejectModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
-            <h3 className="text-base font-bold text-gray-900">Reject Inward Invoice(s)</h3>
-            <p className="text-xs text-gray-500">
-              Provide a statutory rejection reason. This will be transmitted to the supplier via GSTN IMS.
-            </p>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Rejection Reason</label>
-              <select
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                className="w-full text-xs border border-gray-300 rounded-lg p-2 bg-white"
-              >
-                <option value="Goods or services not received / Incorrect invoice details">
-                  Goods or services not received / Incorrect invoice details
-                </option>
-                <option value="Incorrect recipient GSTIN / Wrong customer">
-                  Incorrect recipient GSTIN / Wrong customer
-                </option>
-                <option value="Duplicate invoice entered by supplier">
-                  Duplicate invoice entered by supplier
-                </option>
-                <option value="Mismatched tax rates or wrong HSN computation">
-                  Mismatched tax rates or wrong HSN computation
-                </option>
-                <option value="Commercial dispute / Pending credit note">
-                  Commercial dispute / Pending credit note
-                </option>
-              </select>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setRejectModalOpen(false)}
-                className="px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => performAction(targetRejectIds, 'rejected', rejectReason)}
-                className="px-4 py-1.5 text-xs bg-rose-600 hover:bg-rose-700 text-white font-medium rounded-lg shadow-sm"
-              >
-                Confirm Rejection
-              </button>
-            </div>
+      <Modal
+        open={rejectModalOpen}
+        onClose={() => setRejectModalOpen(false)}
+        title="Reject Inward Invoice(s)"
+        subtitle="Provide a statutory rejection reason — it is transmitted to the supplier via GSTN IMS."
+        maxWidth={520}
+        footer={
+          <>
+            <button type="button" className="btn ghost" onClick={() => setRejectModalOpen(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn danger"
+              onClick={() => performAction(targetRejectIds, 'rejected', rejectReason)}
+              disabled={acting}
+            >
+              Confirm Rejection
+            </button>
+          </>
+        }
+      >
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="input-label" htmlFor="ims-reject-reason">Rejection reason</label>
+          <select
+            id="ims-reject-reason"
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            className="input"
+          >
+            {REJECT_REASONS.map((reason) => (
+              <option key={reason} value={reason}>
+                {reason}
+              </option>
+            ))}
+          </select>
+          <div className="form-hint">
+            {targetRejectIds.length} invoice(s) will be rejected and the reason shared with the supplier.
           </div>
         </div>
-      )}
+      </Modal>
     </div>
   );
 }

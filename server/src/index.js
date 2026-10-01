@@ -4,6 +4,7 @@ import morgan from "morgan";
 import { config } from "./config/index.js";
 import { connectDB } from "./config/db.js";
 import { notFound, errorHandler } from "./middleware/error.js";
+import { apiLimiter } from "./middleware/rateLimit.js";
 import { ROLE_PERMISSIONS } from "./config/constants.js";
 
 import { User } from "./models/User.js";
@@ -46,11 +47,13 @@ const app = express();
 
 // Security hardening
 app.disable("x-powered-by");
+if (process.env.VERCEL) app.set("trust proxy", 1);
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "1; mode=block");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   next();
 });
 
@@ -97,6 +100,9 @@ for (const [role, def] of Object.entries(ROLE_PERMISSIONS)) {
       : def.caps;
 }
 app.locals.roleCaps = roleCaps;
+
+// Coarse API rate ceiling (credential endpoints have their own stricter limiter)
+app.use("/api", apiLimiter);
 
 // Routes
 app.use("/api/auth", authRoutes);
